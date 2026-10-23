@@ -164,10 +164,19 @@ class TestNumericGrammar:
         assert results[0].notation.value == "4"
 
     def test_recognizes_two_digits(self) -> None:
-        """Edge case: two digits."""
-        results = self.grammar.recognize("82")
+        """Edge case: a two-digit run that zero-pads to an assigned code."""
+        results = self.grammar.recognize("50")
         assert len(results) == 1
-        assert results[0].notation.value == "82"
+        assert results[0].notation.value == "50"
+
+    def test_rejects_unassigned_two_digits(self) -> None:
+        """Edge case: a two-digit run with no assigned M49 code is not claimed.
+
+        "82" zero-pads to "082", which ISO 3166-1 does not assign, so no
+        authority could ever accept it — the lane does not claim it.
+        """
+        results = self.grammar.recognize("82")
+        assert len(results) == 0
 
     def test_recognizes_with_whitespace(self) -> None:
         """Edge case: whitespace is trimmed."""
@@ -452,6 +461,89 @@ class TestNameGrammar:
         assert "  United States  "[results[0].start : results[0].end] == (
             results[0].raw_text
         )
+
+
+class TestCodeLaneClaimSets:
+    """The code lanes claim only tokens that can resolve to an ISO 3166-1 code.
+
+    The alpha-2, alpha-3 and numeric lanes recognize *code tokens*, not
+    arbitrary token shapes: a token that no authority could ever accept is
+    never claimed (audit findings E3/E4 — ``scan()`` reports claims, so an
+    over-broad shape surfaces as a spurious mention).
+    """
+
+    def setup_method(self) -> None:
+        self.alpha2 = Alpha2Grammar()
+        self.alpha3 = Alpha3Grammar()
+        self.numeric = NumericGrammar()
+
+    def test_alpha2_claims_only_iso_codes(self) -> None:
+        """Two-letter tokens that are not ISO codes are not claimed."""
+        # "the" is a shape, not a code — nothing to claim.
+        assert self.alpha2.recognize("the") == []
+        # "xx" is not an assigned alpha-2 code.
+        assert self.alpha2.recognize("xx") == []
+        # "and" IS an alpha-3 code, not an alpha-2 one.
+        assert self.alpha2.recognize("and") == []
+        # Assigned codes are still claimed, in any case.
+        for text in ("US", "us", "Us"):
+            results = self.alpha2.recognize(text)
+            assert len(results) == 1, text
+            assert results[0].notation.value == "US"
+
+    def test_alpha3_claims_only_iso_codes(self) -> None:
+        """Three-letter tokens that are not ISO codes are not claimed."""
+        for text in ("the", "for", "xyz"):
+            assert self.alpha3.recognize(text) == [], text
+        # "and" IS an alpha-3 code (Andorra) — a valid-code collision.
+        results = self.alpha3.recognize("and")
+        assert len(results) == 1
+        assert results[0].notation.value == "AND"
+        for text in ("USA", "usa", "UsA"):
+            results = self.alpha3.recognize(text)
+            assert len(results) == 1, text
+            assert results[0].notation.value == "USA"
+
+    def test_numeric_claims_only_assigned_m49(self) -> None:
+        """Digit runs that are not assigned M49 codes are not claimed."""
+        for text in ("01", "15", "999", "0", "00"):
+            assert self.numeric.recognize(text) == [], text
+        # Assigned codes are still claimed, in the zero-padded form.
+        results = self.numeric.recognize("840")
+        assert len(results) == 1
+        assert results[0].notation.value == "840"
+        # The rule zero-pads to 3 digits, so the shorter forms stay claimable.
+        for text in ("4", "004", "50"):
+            results = self.numeric.recognize(text)
+            assert len(results) == 1, text
+
+    def test_claim_sets_match_the_iso_tables(self) -> None:
+        """The recognition key sets equal the rule-layer authority tables.
+
+        Guards against a key set drifting from the table the rules validate
+        against: every claimed token must be one the rule can accept.
+        """
+        from paxman.capabilities.Country.rules.data.iso_3166_ed2024 import (
+            ALPHA2_TO_ALPHA3,
+            ALPHA3_TO_ALPHA2,
+            NUMERIC_TO_ALPHA2,
+        )
+
+        alpha2 = {
+            m.notation.value for m in self.alpha2.recognize(" ".join(ALPHA2_TO_ALPHA3))
+        }
+        assert alpha2 == set(ALPHA2_TO_ALPHA3)
+
+        alpha3 = {
+            m.notation.value for m in self.alpha3.recognize(" ".join(ALPHA3_TO_ALPHA2))
+        }
+        assert alpha3 == set(ALPHA3_TO_ALPHA2)
+
+        numeric = {
+            m.notation.value
+            for m in self.numeric.recognize(" ".join(NUMERIC_TO_ALPHA2))
+        }
+        assert numeric == set(NUMERIC_TO_ALPHA2)
 
 
 class TestNormalizeName:

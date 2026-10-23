@@ -128,13 +128,62 @@ class TestCountryPipeline:
 
     @pytest.mark.integration
     def test_invalid_code(self) -> None:
-        """Recognized shape but invalid code returns INVALID."""
+        """A claimed token that no active rule accepts returns INVALID.
+
+        "SU" is a former ISO 3166-3 code: the alpha-2 lane claims it (it
+        is in the code vocabulary) but the current-code rule rejects it and
+        the historical rule is gated off by default — so the token was
+        seen and refused.
+        """
+        register_capability(CountryCapability())
+        contract = CountryCapability.create_contract()
+        result = run_capability("SU", contract)
+
+        assert result.status == Resolution.INVALID
+        assert result.canonicalized_value is None
+
+    @pytest.mark.integration
+    def test_unassigned_code_is_missing(self) -> None:
+        """A token that is not a code at all is never claimed → MISSING.
+
+        The alpha-2 lane recognizes the code vocabulary, not an arbitrary
+        two-letter shape, so "XX" is not claimed (audit findings E3/E4).
+        """
         register_capability(CountryCapability())
         contract = CountryCapability.create_contract()
         result = run_capability("XX", contract)
 
-        assert result.status == Resolution.INVALID
+        assert result.status == Resolution.MISSING
         assert result.canonicalized_value is None
+        assert len(result.candidates) == 0
+
+    @pytest.mark.integration
+    def test_country_code_lanes_claim_only_valid_codes(self) -> None:
+        """The code lanes claim the code vocabulary, not arbitrary shapes.
+
+        Regression guard for audit findings E3/E4: a token that no
+        authority could ever accept is never claimed, so it resolves
+        MISSING rather than INVALID, and a genuine code still resolves.
+        """
+        register_capability(CountryCapability())
+        contract = CountryCapability.create_contract()
+
+        # Not a code at all -> never claimed.
+        for text in ("the", "for", "01", "15"):
+            result = run_capability(text, contract)
+            assert result.status == Resolution.MISSING, text
+
+        # Genuine codes -> unchanged.
+        for text, expected in (("840", "US"), ("4", "AF"), ("50", "BD"), ("US", "US")):
+            result = run_capability(text, contract)
+            assert result.status == Resolution.SUCCESS, text
+            assert result.canonicalized_value == expected, text
+
+        # A valid-code collision is unchanged — it is a real code, and
+        # ADR-0009 §16 suppression is the designed remedy for it.
+        result = run_capability("and", contract)
+        assert result.status == Resolution.SUCCESS
+        assert result.canonicalized_value == "AD"
 
     @pytest.mark.integration
     def test_historical_name_disabled(self) -> None:
