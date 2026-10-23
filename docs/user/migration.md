@@ -439,15 +439,27 @@ rendered with `repr()`, and `repr(frozenset[str])` follows iteration order,
 which depends on per-process string hash randomisation. The same library
 snapshot gave a different revision in every interpreter.
 
-The revision is now computed from a canonical rendering (sorted sets and
-dicts, declaration-order dataclass fields, callables by qualified name,
-compiled patterns by source and flags). Two consequences:
+The revision is now computed from a canonical rendering: containers carry
+their type (an empty `set`, `frozenset` and `dict` stay distinguishable), set
+and dict members are sorted, dataclass `init` fields follow declaration order
+with `repr=False` ignored, dataclasses and callables carry their defining
+module, callables carry captured state (closure cells and `partial`
+arguments), self-referential payloads stop at a `<cycle:…>` marker, and only
+the ` at 0x…>` suffix is stripped from an unmodelled repr. Two consequences:
 
 - **Revision values changed once.** If you persisted
   `version_stamp.recognition_revision` from an earlier build, re-baseline it;
   the old values were not stable enough to compare against anyway.
 - **Nothing else changed.** Canonical values, statuses, spans, provenance and
   candidate ordering are byte-identical for the same input and contract.
+
+One limit is worth knowing if you write a community `extra_grammars`
+extension: a matcher payload of a type `stable_repr` does not model keeps its
+own `repr()` (minus any ` at 0x…>` address). If that repr embeds an unordered
+container, its text is order-dependent and the payload cannot contribute exact
+revision identity. Shipped matchers are all modelled, so this only reaches
+extension payloads — make such a payload a dataclass, or expose the state you
+want hashed.
 
 ### 0.5.0 — New capabilities: Timezone + UtcOffset (additive)
 

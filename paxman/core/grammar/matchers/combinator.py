@@ -265,9 +265,7 @@ class CombinatorMatcher:
         )
         anchors_repr = stable_repr(self.anchors)
         pred_repr = (
-            getattr(self.predicate, "__qualname__", str(self.predicate))
-            if self.predicate is not None
-            else "None"
+            stable_repr(self.predicate) if self.predicate is not None else "None"
         )
         digest_val = hashlib.sha256(
             f"{expr_repr}\x00{view_repr}\x00{boundary_repr}\x00{anchors_repr}\x00{pred_repr}".encode()

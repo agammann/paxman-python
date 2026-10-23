@@ -188,58 +188,160 @@ def test_discovery_freeze_reads_digest_not_sorted_tokens() -> None:
     )
 
 
-def test_stable_repr_is_hash_order_independent() -> None:
-    """``stable_repr`` must not depend on set/dict iteration order.
+def test_stable_repr_renders_sets_and_dicts_canonically() -> None:
+    """Exact serialisation: sorted, and tagged by container type.
 
-    ``repr(frozenset[str])`` iterates in hash order, which is randomised per
-    process, so it cannot feed a digest that must be identical across
-    processes. ``stable_repr`` sorts set members and dict items.
+    Comparing two equal collections inside one interpreter cannot catch an
+    iteration-order-dependent renderer — equal frozensets share an iteration
+    order — so the canonical text is pinned instead.
     """
+    import re
+
     from paxman.core.grammar.matchers._stable import stable_repr
 
-    assert stable_repr(frozenset({"alpha", "beta", "gamma"})) == stable_repr(
-        frozenset({"gamma", "beta", "alpha"})
+    assert (
+        stable_repr(frozenset({"alpha", "beta", "gamma"}))
+        == "frozenset({'alpha','beta','gamma'})"
     )
-    assert stable_repr({"b": 1, "a": 2}) == stable_repr({"a": 2, "b": 1})
-    # Ordered containers keep their order — order is meaningful there.
+    assert stable_repr({"b": 1, "a": 2}) == "dict({'a':2,'b':1})"
+    assert stable_repr(("a", "b")) == "tuple('a','b')"
+    assert stable_repr(["a", "b"]) == "list(['a','b'])"
+    # An empty container keeps its type, so an empty set and an empty dict
+    # never collapse onto the same revision input.
+    assert stable_repr(set()) == "set({})"
+    assert stable_repr(frozenset()) == "frozenset({})"
+    assert stable_repr({}) == "dict({})"
+    # Sequence order is meaningful and therefore preserved.
     assert stable_repr(("a", "b")) != stable_repr(("b", "a"))
     # Scalars render as repr.
     assert stable_repr("US") == "'US'"
     assert stable_repr(None) == "None"
-    # Callables render by qualname, never by address.
-    from paxman.core.grammar.matchers._stable import stable_repr as sr
-
-    def _sample() -> None:  # pragma: no cover - identity only
-        pass
-
-    assert sr(_sample).endswith("._sample")
-    assert "0x" not in sr(_sample)
     # Compiled patterns render by source and flags, not by object identity.
-    import re
-
-    assert stable_repr(re.compile("a+", re.I)) == stable_repr(re.compile("a+", re.I))
+    assert stable_repr(re.compile("a+", re.I)) == "re('a+',34)"
     assert stable_repr(re.compile("a+")) != stable_repr(re.compile("a+", re.I))
     assert "0x" not in stable_repr(re.compile("a+"))
 
-    # An unmodelled object keeps its repr, but never its memory address — two
-    # instances of the same type must render identically in two processes.
+
+def test_stable_repr_terminates_on_self_referential_payloads() -> None:
+    """A payload that contains itself gets a back-edge marker, not a crash.
+
+    An extension-supplied cycle must not raise ``RecursionError`` out of
+    ``freeze_registry`` — the registry is already frozen by then, so the
+    revision would never be computed.
+    """
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    cyclic: list[object] = []
+    cyclic.append(cyclic)
+    assert stable_repr(cyclic) == "list([<cycle:builtins.list>])"
+
+    nested: dict[str, object] = {}
+    nested["self"] = nested
+    assert stable_repr(nested) == "dict({'self':<cycle:builtins.dict>})"
+
+    # A *shared* subtree is not a cycle and is rendered in full at each site.
+    shared = ("a",)
+    assert stable_repr((shared, shared)) == "tuple(tuple('a'),tuple('a'))"
+
+
+def test_stable_repr_captures_callable_state() -> None:
+    """Callables render by name plus captured state, never by address."""
+    import functools
+
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    def make(value: int):
+        def predicate(text: str, subject: str) -> bool:
+            return text == subject[:value]
+
+        return predicate
+
+    one, two = make(1), make(2)
+    # Same factory line, same qualname, different captured value.
+    assert stable_repr(one) != stable_repr(two)
+    assert stable_repr(one) == stable_repr(make(1))
+    assert ".predicate[1]" in stable_repr(one)
+    # The defining module is part of the name, so same-qualname callables
+    # from different modules cannot collide.
+    assert stable_repr(one).startswith(__name__ + ".")
+    assert "0x" not in stable_repr(one)
+
+    assert (
+        stable_repr(functools.partial(int, base=2))
+        == "partial(builtins.int,tuple(),dict({'base':2}))"
+    )
+    assert stable_repr(functools.partial(int, base=2)) != stable_repr(
+        functools.partial(int, base=8)
+    )
+
+    # A bound method renders by name only: its instance is already rendered by
+    # the enclosing dataclass, and following it would cycle back.
+    class _Bound:
+        def method(self) -> None:  # pragma: no cover - identity only
+            pass
+
+    assert stable_repr(_Bound().method).endswith("._Bound.method")
+    assert stable_repr(_Bound().method) == stable_repr(_Bound().method)
+
+
+def test_stable_repr_includes_repr_false_init_fields() -> None:
+    """``repr=False`` is a display hint, not a reason to drop configuration."""
+    import dataclasses
+
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    @dataclasses.dataclass(frozen=True)
+    class _Payload:
+        visible: str
+        hidden: str = dataclasses.field(repr=False)
+        derived: str = dataclasses.field(default="x", init=False, repr=False)
+
+    first = _Payload(visible="v", hidden="one")
+    second = _Payload(visible="v", hidden="two")
+    assert stable_repr(first) != stable_repr(second)
+    assert "hidden='one'" in stable_repr(first)
+    # init=False is computed, not configured, so it stays out of the digest.
+    assert "derived=" not in stable_repr(first)
+
+
+def test_stable_repr_strips_only_the_address_suffix() -> None:
+    """An unmodelled payload loses its address but keeps meaningful hex."""
+    import re
+
+    from paxman.core.grammar.matchers._stable import stable_repr
+
     class _Opaque:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __repr__(self) -> str:
+            return f"_Opaque(value=0x{self.value:x})"
+
+    # A meaningful hexadecimal payload survives the address filter.
+    assert stable_repr(_Opaque(16)) == "_Opaque(value=0x10)"
+
+    class _Default:
         pass
 
-    first, second = _Opaque(), _Opaque()
+    first, second = _Default(), _Default()
+    # A default repr's address is stripped, so two instances agree.
     assert stable_repr(first) == stable_repr(second)
     assert re.search(r"0x[0-9a-fA-F]", stable_repr(first)) is None
 
 
-def test_anchor_set_stable_repr_is_hash_order_independent() -> None:
-    """An ``AnchorSet``'s frozenset fields must render canonically."""
+def test_anchor_set_stable_repr_is_canonical() -> None:
+    """A dataclass payload renders its frozenset fields sorted."""
     from paxman.core.grammar.anchors import AnchorSet
     from paxman.core.grammar.matchers._stable import stable_repr
 
-    a = AnchorSet(literals=frozenset({"x", "y"}), key_sets=(frozenset({"p", "q"}),))
-    b = AnchorSet(literals=frozenset({"y", "x"}), key_sets=(frozenset({"q", "p"}),))
-    assert stable_repr(a) == stable_repr(b)
-    assert "0x" not in stable_repr(a)
+    anchors = AnchorSet(
+        literals=frozenset({"y", "x"}), key_sets=(frozenset({"q", "p"}),)
+    )
+    rendered = stable_repr(anchors)
+    assert "literals=frozenset({'x','y'})" in rendered
+    assert "key_sets=tuple(frozenset({'p','q'}))" in rendered
+    assert rendered.startswith("paxman.core.grammar.anchors.AnchorSet(")
+    assert "0x" not in rendered
 
 
 def test_recognition_revision_is_process_stable() -> None:
