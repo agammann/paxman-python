@@ -23,6 +23,7 @@ from paxman.core.grammar.boundary_spec import BoundarySpec, check_boundary
 from paxman.core.grammar.matchers._emit_validation import (
     validate_emit as _validate_emit,
 )
+from paxman.core.grammar.matchers._stable import stable_repr
 from paxman.core.grammar.scan_context import View
 
 _check_boundary = check_boundary  # legacy alias for tests
@@ -61,7 +62,9 @@ class ScannerMatcher:
         elif self.view_name is not None and self.view is None:
             object.__setattr__(self, "view", self.view_name)
         qualname = getattr(self.scan, "__qualname__", type(self.scan).__name__)
-        boundary_repr = repr(self.boundary) if self.boundary is not None else "None"
+        boundary_repr = (
+            stable_repr(self.boundary) if self.boundary is not None else "None"
+        )
         view_repr = self.view_name if self.view_name is not None else "None"
         digest_val = hashlib.sha256(
             f"{qualname}\x00{self.max_window}\x00{view_repr}\x00{boundary_repr}".encode()

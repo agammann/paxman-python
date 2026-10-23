@@ -48,6 +48,14 @@ Core owns the domain vocabulary (pipeline value objects + `Rule`/`Grammar` ABCs)
   `tests/unit/test_kernel_stripped_chars.py`).
 - `validate_emit` at construction — span/raw_text invariants fail fast at emit.
 - Matcher digests memoised — per-matcher digest cached.
+- Digests render through `matchers/_stable.py` `stable_repr()` — never `repr()`.
+  A digest feeds `recognition_revision`, which must be identical across
+  processes; `repr(frozenset[str])` follows hash order (randomised per process
+  via `PYTHONHASHSEED`) and `repr()` of a bound method carries an address.
+  `stable_repr` sorts sets/dicts, keeps sequence order, renders dataclass
+  `init` fields in declaration order, callables by `__qualname__`, and compiled
+  patterns by source+flags. Pinned by the cross-process test in
+  `tests/unit/test_discovery_revision.py`.
 - `PipelineGrammar` `matchers` delegation — `recognize()` delegates to `run_matchers()`.
 - Common-word suppression 67 + 6 kinds (`regex`/`lexicon`/`scanner`/`combinator`/`candidates`/`label`, `Property` deleted) — `COMMON_WORDS` + `suppressible` + `suppress_common_words`.
 

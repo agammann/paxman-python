@@ -18,6 +18,7 @@ from paxman.core.grammar.boundary_spec import BoundarySpec, check_boundary
 from paxman.core.grammar.matchers._emit_validation import (
     validate_emit as _validate_emit,
 )
+from paxman.core.grammar.matchers._stable import stable_repr
 from paxman.core.grammar.scan_context import View
 
 
@@ -251,7 +252,7 @@ class CombinatorMatcher:
         elif self.view_name is not None and self.view is None:
             object.__setattr__(self, "view", self.view_name)
         try:
-            expr_repr = repr(self.expr)
+            expr_repr = stable_repr(self.expr)
         except (ValueError, TypeError, AttributeError, RecursionError, RuntimeError):
             expr_repr = str(self.expr)
         view_repr = (
@@ -259,8 +260,10 @@ class CombinatorMatcher:
             if self.view_name is not None
             else (self.view if self.view is not None else "None")
         )
-        boundary_repr = repr(self.boundary) if self.boundary is not None else "None"
-        anchors_repr = repr(self.anchors)
+        boundary_repr = (
+            stable_repr(self.boundary) if self.boundary is not None else "None"
+        )
+        anchors_repr = stable_repr(self.anchors)
         pred_repr = (
             getattr(self.predicate, "__qualname__", str(self.predicate))
             if self.predicate is not None

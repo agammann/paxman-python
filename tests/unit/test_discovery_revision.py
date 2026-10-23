@@ -1,8 +1,15 @@
-"""RED→GREEN gate for Task A2: per-matcher digest memoization.
+"""Gates for the ``recognition_revision`` stamp.
 
-Asserts freeze_registry uses matcher.digest (computed once at construction)
-instead of re-deriving sorted tokens per freeze, and that snapshot hashing
-is memoized. Timing <5ms is recorded in PR body, not gating.
+Two properties, both regression-pinned:
+
+* **Cost** — ``freeze_registry`` uses each matcher's cached ``digest``
+  (computed once at construction) instead of re-deriving sorted tokens per
+  freeze, and snapshot hashing is memoized.
+* **Stability** — the revision is identical across processes for the same
+  library snapshot. Several payloads used to be rendered with ``repr()``,
+  which for a ``frozenset[str]`` follows hash order, so the revision varied
+  with ``PYTHONHASHSEED`` and could not distinguish "different library" from
+  "different process".
 """
 
 from __future__ import annotations
@@ -179,3 +186,101 @@ def test_discovery_freeze_reads_digest_not_sorted_tokens() -> None:
     assert "sorted(cast(Iterable[str], tokens_set))" not in freeze_section, (
         "freeze_registry must not re-derive sorted tokens — use matcher.digest"
     )
+
+
+def test_stable_repr_is_hash_order_independent() -> None:
+    """``stable_repr`` must not depend on set/dict iteration order.
+
+    ``repr(frozenset[str])`` iterates in hash order, which is randomised per
+    process, so it cannot feed a digest that must be identical across
+    processes. ``stable_repr`` sorts set members and dict items.
+    """
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    assert stable_repr(frozenset({"alpha", "beta", "gamma"})) == stable_repr(
+        frozenset({"gamma", "beta", "alpha"})
+    )
+    assert stable_repr({"b": 1, "a": 2}) == stable_repr({"a": 2, "b": 1})
+    # Ordered containers keep their order — order is meaningful there.
+    assert stable_repr(("a", "b")) != stable_repr(("b", "a"))
+    # Scalars render as repr.
+    assert stable_repr("US") == "'US'"
+    assert stable_repr(None) == "None"
+    # Callables render by qualname, never by address.
+    from paxman.core.grammar.matchers._stable import stable_repr as sr
+
+    def _sample() -> None:  # pragma: no cover - identity only
+        pass
+
+    assert sr(_sample).endswith("._sample")
+    assert "0x" not in sr(_sample)
+    # Compiled patterns render by source and flags, not by object identity.
+    import re
+
+    assert stable_repr(re.compile("a+", re.I)) == stable_repr(re.compile("a+", re.I))
+    assert stable_repr(re.compile("a+")) != stable_repr(re.compile("a+", re.I))
+    assert "0x" not in stable_repr(re.compile("a+"))
+
+    # An unmodelled object keeps its repr, but never its memory address — two
+    # instances of the same type must render identically in two processes.
+    class _Opaque:
+        pass
+
+    first, second = _Opaque(), _Opaque()
+    assert stable_repr(first) == stable_repr(second)
+    assert re.search(r"0x[0-9a-fA-F]", stable_repr(first)) is None
+
+
+def test_anchor_set_stable_repr_is_hash_order_independent() -> None:
+    """An ``AnchorSet``'s frozenset fields must render canonically."""
+    from paxman.core.grammar.anchors import AnchorSet
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    a = AnchorSet(literals=frozenset({"x", "y"}), key_sets=(frozenset({"p", "q"}),))
+    b = AnchorSet(literals=frozenset({"y", "x"}), key_sets=(frozenset({"q", "p"}),))
+    assert stable_repr(a) == stable_repr(b)
+    assert "0x" not in stable_repr(a)
+
+
+def test_recognition_revision_is_process_stable() -> None:
+    """``recognition_revision`` must be identical across processes.
+
+    The revision hashes every matcher's compiled payload. Several payloads
+    were rendered with ``repr()`` — which for a ``frozenset[str]`` follows
+    hash order and therefore varies with ``PYTHONHASHSEED``. A revision that
+    changes between two runs of the same library snapshot cannot be used to
+    tell "different library" from "different process".
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    script = (
+        "import paxman\n"
+        "from paxman.core.discovery import freeze_registry, get_recognition_revision\n"
+        "paxman.register_all_shipped()\n"
+        "freeze_registry()\n"
+        "print(get_recognition_revision())\n"
+    )
+    revisions: set[str] = set()
+    for seed in ("0", "1", "12345"):
+        env = os.environ.copy()
+        env["PYTHONHASHSEED"] = seed
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(repo_root),
+            env=env,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        revisions.add(completed.stdout.strip())
+    assert len(revisions) == 1, (
+        "recognition_revision varies across processes "
+        f"(PYTHONHASHSEED 0/1/12345): {sorted(revisions)}"
+    )
+    assert revisions != {"0"}

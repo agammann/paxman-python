@@ -429,6 +429,26 @@ bare `Element` name for future non-chemical element domains (e.g.
 (`Section IR-3.1-names-and-symbols`, `Section PTOE-element-registry`).
 See the [ChemicalElement guide](capabilities/chemical_element/).
 
+### Unreleased — `recognition_revision` is now process-stable (changed)
+
+`VersionStamp.recognition_revision` is documented as hashing the compiled
+matcher set plus snapshot hashes, and is meant to let you tell "a different
+library snapshot produced this result" from "a different process produced
+this result". It could not do that: several recognition payloads were
+rendered with `repr()`, and `repr(frozenset[str])` follows iteration order,
+which depends on per-process string hash randomisation. The same library
+snapshot gave a different revision in every interpreter.
+
+The revision is now computed from a canonical rendering (sorted sets and
+dicts, declaration-order dataclass fields, callables by qualified name,
+compiled patterns by source and flags). Two consequences:
+
+- **Revision values changed once.** If you persisted
+  `version_stamp.recognition_revision` from an earlier build, re-baseline it;
+  the old values were not stable enough to compare against anyway.
+- **Nothing else changed.** Canonical values, statuses, spans, provenance and
+  candidate ordering are byte-identical for the same input and contract.
+
 ### 0.5.0 — New capabilities: Timezone + UtcOffset (additive)
 
 `Timezone` (IANA key canonical, `iana` default, no offered formats,

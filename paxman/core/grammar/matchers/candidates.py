@@ -23,6 +23,7 @@ from paxman.core.grammar.boundary_spec import BoundarySpec, check_boundary
 from paxman.core.grammar.matchers._emit_validation import (
     validate_emit as _validate_emit,
 )
+from paxman.core.grammar.matchers._stable import stable_repr
 from paxman.core.grammar.scan_context import ScanContext, View
 
 # Context-local storage for per-call routing state. The matcher singletons
@@ -128,7 +129,7 @@ class CandidatesMatcher:
                 cand_digests.append(d)
             else:
                 try:
-                    cand_digests.append(repr(c))
+                    cand_digests.append(stable_repr(c))
                 except (
                     ValueError,
                     TypeError,
@@ -142,8 +143,10 @@ class CandidatesMatcher:
             if self.view_name is not None
             else (self.view if self.view is not None else "None")
         )
-        boundary_repr = repr(self.boundary) if self.boundary is not None else "None"
-        anchors_repr = repr(self.anchors)
+        boundary_repr = (
+            stable_repr(self.boundary) if self.boundary is not None else "None"
+        )
+        anchors_repr = stable_repr(self.anchors)
         names_repr = "|".join(self.candidate_names) if self.candidate_names else ""
         sems_repr = (
             "|".join(self.candidate_semantics) if self.candidate_semantics else ""
