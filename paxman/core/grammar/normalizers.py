@@ -479,6 +479,39 @@ class StripSeparators:
         return subject, tuple(starts), ends
 
 
+class DecimalDigitFold:
+    """Fold Unicode decimal digits (Nd) to ASCII for numeric-code scanning.
+
+    ``int()`` accepts any Nd digit — ``int("٨٤٠") == 840`` — so any validator
+    that converts text to an integer already accepted every decimal-digit
+    script. A lexicon whose keys are ASCII digits needs the same reach, so the
+    view rewrites each Nd character to its ASCII value before key lookup.
+
+    The rewrite is strictly 1:1 — `str` indexes code points, so the astral
+    digit blocks (U+1D7CE MATHEMATICAL BOLD etc.) are single characters too —
+    so identity offsets stay exact and nothing is stripped.
+    """
+
+    name: str = "ascii_digits"
+    provenance: Provenance | None = None
+    stripped_chars: str | None = None
+
+    def normalize(
+        self, text: str
+    ) -> tuple[str, tuple[int, ...] | None, tuple[int, ...] | None]:
+        """Map Nd characters to ASCII digits; length-preserving."""
+        if text.isascii():
+            return text, None, None
+        table = {
+            ord(ch): str(unicodedata.decimal(ch))
+            for ch in text
+            if not ch.isascii() and ch.isdecimal()
+        }
+        if not table:
+            return text, None, None
+        return text.translate(table), None, None
+
+
 @dataclass(frozen=True, slots=True)
 class IDNAFold:
     """IDNA view: strip ``\\t\\n\\r``.

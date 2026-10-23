@@ -179,6 +179,14 @@ class TestCountryPipeline:
             assert result.status == Resolution.SUCCESS, text
             assert result.canonicalized_value == expected, text
 
+        # Every Unicode decimal-digit script still resolves: the numeric rule
+        # goes through int(), which accepts any Nd digit, so the ASCII lexicon
+        # runs on the ascii_digits view.
+        for text in ("\u0668\u0664\u0660", "\u096e\u096a\u0966", "\uff18\uff14\uff10"):
+            result = run_capability(text, contract)
+            assert result.status == Resolution.SUCCESS, text
+            assert result.canonicalized_value == "US", text
+
         # A valid-code collision is unchanged — it is a real code, and
         # ADR-0009 §16 suppression is the designed remedy for it.
         result = run_capability("and", contract)

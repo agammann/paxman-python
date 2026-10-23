@@ -16,7 +16,7 @@ Canonicalizes **one country mention** per call — a code or a name — to a can
 | Country names in English (`United States`, `Germany`) | Regions or subdivisions (`California`, `Bavaria`) — countries only |
 | CLDR localized names (`Alemania` → `DE`) — only when `include_localized=True` | Localized names when the flag is off — recognized but `INVALID` (no authority claims them) |
 | Historical/deprecated names (`Burma`) — only when `include_historical=True`, via ISO 3166-3 | Historical names when the flag is off — `INVALID` |
-| Former codes (`SU` → USSR) — only when `include_historical=True` | Tokens that are not codes at all (`the`, `for`, `01`, `15`) — never claimed → `MISSING` |
+| Former codes (`SU`, `BU`) — always claimed; resolve only when `include_historical=True` | Tokens that are not codes at all (`the`, `for`, `01`, `15`) — never claimed → `MISSING` |
 
 The code lanes recognize the ISO 3166-1 code **vocabulary**, not an arbitrary
 token shape. A two-letter word that is not an assigned alpha-2 code is never
@@ -66,6 +66,13 @@ whole-input common word stays recognized (the A0 exemption,
 
 Words that are *not* codes (`the`, `for`, `01`, `15`) are never claimed at all,
 so there is nothing to suppress.
+
+Suppression is not a general "ignore any word that is also a code" switch. It
+covers only that fixed intersection, so a valid code that is not a common
+English word is claimed and never suppressed: `kg` → `KG` (Kyrgyzstan) means
+`"US kg"` is a two-mention input and raises `MultipleMentionsError` even with
+`suppress_common_words=True`. Split the text when a unit suffix can sit next
+to a country.
 
 ---
 

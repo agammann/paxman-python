@@ -452,11 +452,16 @@ claimed, including the zero-padded numeric forms (`4` → `AF`, `50` → `BD`),
 the ISO 3166-3 former codes (`SU`, `BU`), and the lowercase forms (`us`,
 `usa`, `and`). `scan()` mentions for a typical sentence drop from 9 to 4.
 
-The residual valid-code collisions (`and` → `AD`, `to` → `TO`, `by` → `BY`,
-`kg` → `KG`) are unchanged: they are real ISO 3166-1 codes and remain the
-ADR-0009 §16 common-word-suppression class. Pass
-`suppress_common_words=True` to canonicalize prose (`"US and USA"` →
-`SUCCESS "US"`).
+The residual valid-code collisions (`and` → `AD`, `to` → `TO`, `by` → `BY`)
+are unchanged: they are real ISO 3166-1 codes and remain the ADR-0009 §16
+common-word-suppression class. Pass `suppress_common_words=True` to
+canonicalize prose (`"US and USA"` → `SUCCESS "US"`).
+
+Suppression covers the fixed `COMMON_WORDS` intersection only. A valid code
+that is *not* a common English word is still claimed and is not suppressed —
+`kg` → `KG` is the clear case, so `"US kg"` stays a two-mention input and
+raises `MultipleMentionsError` with suppression on as well. Split the text
+when a unit suffix can appear next to a country.
 
 Migrate: if you asserted `INVALID` for a token that is not a code, update
 goldens to `MISSING`. See the [Country guide](capabilities/country/).

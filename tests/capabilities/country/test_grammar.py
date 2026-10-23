@@ -520,30 +520,94 @@ class TestCodeLaneClaimSets:
     def test_claim_sets_match_the_iso_tables(self) -> None:
         """The recognition key sets equal the rule-layer authority tables.
 
-        Guards against a key set drifting from the table the rules validate
-        against: every claimed token must be one the rule can accept.
+        Both directions, on the shipped key sets directly: every authority
+        key is claimed (no input a rule accepts is unreachable) and every
+        claimed key has an authority (no spurious mention). Deriving the
+        grammar input from rule keys alone would only prove the first
+        direction — an extra key in a ``*_CODE_KEYS`` set would be invisible.
         """
+        from paxman.capabilities.Country.grammar.data.alpha2_codes import (
+            ALPHA2_CODE_KEYS,
+        )
+        from paxman.capabilities.Country.grammar.data.alpha3_codes import (
+            ALPHA3_CODE_KEYS,
+        )
+        from paxman.capabilities.Country.grammar.data.numeric_codes import (
+            NUMERIC_CODE_KEYS,
+        )
+        from paxman.capabilities.Country.rules.data.iso_3166_ed2020_part3 import (
+            FORMER_ALPHA2_CODES,
+            FORMER_NUMERIC_TO_ALPHA2,
+        )
         from paxman.capabilities.Country.rules.data.iso_3166_ed2024 import (
             ALPHA2_TO_ALPHA3,
             ALPHA3_TO_ALPHA2,
             NUMERIC_TO_ALPHA2,
         )
 
-        alpha2 = {
-            m.notation.value for m in self.alpha2.recognize(" ".join(ALPHA2_TO_ALPHA3))
+        # Alpha keys are lowercased for the casefolded view; the authority
+        # tables are uppercase. Alpha-2 also carries the former ISO 3166-3
+        # codes the historical rule validates. Alpha-3 carries no former
+        # codes, because no rule ever resolved one: a former alpha-3 such as
+        # "BUR" or "YUG" was INVALID even with include_historical=True before
+        # the narrowing, so claiming none loses no successful result.
+        expected_alpha2 = {code.lower() for code in ALPHA2_TO_ALPHA3} | {
+            code.lower() for code in FORMER_ALPHA2_CODES
         }
-        assert alpha2 == set(ALPHA2_TO_ALPHA3)
+        assert expected_alpha2 == ALPHA2_CODE_KEYS
+        expected_alpha3 = {code.lower() for code in ALPHA3_TO_ALPHA2}
+        assert expected_alpha3 == ALPHA3_CODE_KEYS
 
-        alpha3 = {
-            m.notation.value for m in self.alpha3.recognize(" ".join(ALPHA3_TO_ALPHA2))
-        }
-        assert alpha3 == set(ALPHA3_TO_ALPHA2)
+        # Numeric: every token whose zero-padded form is an authority code —
+        # current M49 and retired ISO 3166-3 alike, at every width the
+        # validator's ``int()`` + ``:03d`` padding can reach.
+        numeric_authority = set(NUMERIC_TO_ALPHA2) | set(FORMER_NUMERIC_TO_ALPHA2)
+        expected_numeric: set[str] = set()
+        for code in numeric_authority:
+            expected_numeric.add(code)
+            for width in (1, 2):
+                if code[:width] == "0" * width:
+                    expected_numeric.add(code[width:])
+        assert expected_numeric == NUMERIC_CODE_KEYS
 
-        numeric = {
+        # The key sets are actually wired into the matchers that claim.
+        assert {
+            m.notation.value.lower()
+            for m in self.alpha2.recognize(" ".join(ALPHA2_CODE_KEYS))
+        } == ALPHA2_CODE_KEYS
+        assert {
+            m.notation.value.lower()
+            for m in self.alpha3.recognize(" ".join(ALPHA3_CODE_KEYS))
+        } == ALPHA3_CODE_KEYS
+        assert {
             m.notation.value
-            for m in self.numeric.recognize(" ".join(NUMERIC_TO_ALPHA2))
-        }
-        assert numeric == set(NUMERIC_TO_ALPHA2)
+            for m in self.numeric.recognize(" ".join(NUMERIC_CODE_KEYS))
+        } == NUMERIC_CODE_KEYS
+
+    def test_numeric_lane_claims_unicode_decimal_digits(self) -> None:
+        """Every Unicode decimal-digit (Nd) script is claimed.
+
+        The numeric rule resolves through ``int()``, which accepts any Nd
+        digit, so the ASCII key set has to reach those forms — otherwise the
+        narrowing would turn a previously successful input into MISSING.
+        """
+        for token in (
+            "\u0668\u0664\u0660",
+            "\u096e\u096a\u0966",
+            "\uff18\uff14\uff10",
+            "\U0001d7d6\U0001d7d2\U0001d7ce",
+        ):
+            matches = self.numeric.recognize(token)
+            assert len(matches) == 1, token
+            # The raw digits are kept; the view only rewrites for lookup.
+            assert matches[0].notation.value == token
+            assert (matches[0].start, matches[0].end) == (0, 3)
+
+        # The narrowing still holds: a run that no code can accept is unseen,
+        # in ASCII and in a non-ASCII script alike ("82" pads to unassigned
+        # "082").
+        assert self.numeric.recognize("82") == []
+        assert self.numeric.recognize("\u0668\u0662") == []
 
 
 class TestNormalizeName:

@@ -5,12 +5,14 @@ in their zero-padded 3-digit form, plus the shorter 1- and 2-digit forms
 that zero-pad to an assigned code (the validation rule pads to 3 digits,
 so "4" resolves to "004"). Recognition is over the code vocabulary, not
 over an arbitrary 1-3 digit run — a number that no authority could ever
-accept is never claimed. The raw text is scanned (the keys are digits,
-so no case fold is needed). BoundarySpec.WORD provides word-boundary
-discipline (ADR-0009 §10). Syntax only: never resolves the code to a
-country. Suppressible marker present (ADR-0009 §16) — digit hits never
-collide with COMMON_WORDS but declaration keeps the short-code surface
-uniform.
+accept is never claimed. Scanning runs on the ``ascii_digits`` view: the
+rule resolves through ``int()``, which accepts every Unicode decimal-digit
+script ("٨٤٠" is 840), so the ASCII keys must reach those forms too. The
+view is 1:1, so spans map back to the source text and the notation keeps
+the raw digits. BoundarySpec.WORD provides word-boundary discipline
+(ADR-0009 §10). Syntax only: never resolves the code to a country.
+Suppressible marker present (ADR-0009 §16) — digit hits never collide with
+COMMON_WORDS but declaration keeps the short-code surface uniform.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ def _emit(span: tuple[int, int], ctx: ScanContext) -> CountryNotation:
 _MATCHER = LexiconMatcher(
     tokens=NUMERIC_CODE_KEYS,
     boundary=BoundarySpec.WORD,
-    view=None,
+    view="ascii_digits",
     anchors=AnchorSet(),
     emit=_emit,
     suppressible=True,
