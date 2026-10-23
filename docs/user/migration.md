@@ -443,8 +443,9 @@ The revision is now computed from a canonical rendering: containers carry
 their type (an empty `set`, `frozenset` and `dict` stay distinguishable), set
 and dict members are sorted, dataclass `init` fields follow declaration order
 with `repr=False` ignored, dataclasses and callables carry their defining
-module, callables carry captured state (closure cells and `partial`
-arguments), self-referential payloads stop at a `<cycle:…>` marker, and only
+module, callables carry bound state (closure cells, default and
+keyword-default arguments, `partial` arguments), self-referential payloads
+and callables stop at a `<cycle:…>` marker, and only
 the ` at 0x…>` suffix is stripped from an unmodelled repr. Two consequences:
 
 - **Revision values changed once.** If you persisted

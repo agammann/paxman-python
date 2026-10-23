@@ -56,8 +56,9 @@ Core owns the domain vocabulary (pipeline value objects + `Rule`/`Grammar` ABCs)
   `frozenset` and `dict` stay distinct), sorts set/dict members, keeps
   sequence order, renders dataclass `init` fields in declaration order
   (`repr=False` ignored — it is a display hint), qualifies dataclasses and
-  callables by module, renders callables with captured state (closure cells,
-  `partial` args), tolerates self-referential payloads with a `<cycle:…>`
+  callables by module, renders callables with bound state (closure cells,
+  default/keyword-default arguments, `partial` args), tolerates
+  self-referential payloads and callables with a `<cycle:…>`
   marker, and strips only a ` at 0x…>` address suffix from an unmodelled
   repr. Pinned by exact-serialisation and cross-process tests in
   `tests/unit/test_discovery_revision.py`.

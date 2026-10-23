@@ -22,8 +22,9 @@ memory address.
   initialises can affect recognition;
 * dataclasses and callables carry their defining module, so same-named
   objects from different modules cannot collide;
-* callables render by qualified name plus any captured state (closure cells,
-  ``functools.partial`` arguments) — never by address;
+* callables render by qualified name plus any bound state — closure cells,
+  default and keyword-default arguments (a free variable can be bound either
+  way), and ``functools.partial`` arguments — never by address;
 * compiled patterns render by source and flags;
 * a payload that contains itself renders a back-edge marker instead of
   recursing forever;
@@ -82,18 +83,31 @@ def _render_callable(obj: Any, seen: set[int]) -> str:
             f"{_render(obj.args, seen)},"
             f"{_render(obj.keywords or {}, seen)})"
         )
-    closure = getattr(obj, "__closure__", None)
-    if not closure:
-        return head
-    cells: list[str] = []
-    for cell in cast(tuple[Any, ...], closure):
+    state = _callable_state(obj, seen)
+    return f"{head}[{state}]" if state else head
+
+
+def _callable_state(obj: Any, seen: set[int]) -> str:
+    """Render the bound state of a function: closure cells, then defaults.
+
+    A free variable can be bound either by a closure cell or by a default
+    argument, and both change behaviour, so both are rendered. Insertion
+    order is preserved for the defaults: changing ``(a=1, b=2)`` to
+    ``(a=2, b=1)`` changes what the callable does.
+    """
+    parts: list[str] = []
+    for cell in cast(tuple[Any, ...], getattr(obj, "__closure__", None) or ()):
         try:
-            value = cast(Any, cell.cell_contents)
+            parts.append(_render(cell.cell_contents, seen))
         except ValueError:  # pragma: no cover - cell not yet bound
-            cells.append("<empty>")
-            continue
-        cells.append(_render(value, seen))
-    return f"{head}[{','.join(cells)}]"
+            parts.append("<empty>")
+    defaults = cast(tuple[Any, ...] | None, getattr(obj, "__defaults__", None))
+    if defaults:
+        parts.append(_render(defaults, seen))
+    kwdefaults = cast(dict[str, Any] | None, getattr(obj, "__kwdefaults__", None))
+    if kwdefaults:
+        parts.append(_render(kwdefaults, seen))
+    return ",".join(parts)
 
 
 def _render(obj: Any, seen: set[int]) -> str:
@@ -158,6 +172,10 @@ def _render(obj: Any, seen: set[int]) -> str:
             seen.discard(marker)
         return _qualified_name(obj) + "(" + ",".join(rendered) + ")"
     if callable(obj):
-        return _render_callable(obj, seen)
+        seen.add(marker)
+        try:
+            return _render_callable(obj, seen)
+        finally:
+            seen.discard(marker)
     # Unmodelled payload: keep what its repr says, minus any memory address.
     return _ADDRESS_SUFFIX.sub(" at 0x>", repr(obj))

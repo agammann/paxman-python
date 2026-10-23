@@ -284,6 +284,64 @@ def test_stable_repr_captures_callable_state() -> None:
     assert stable_repr(_Bound().method) == stable_repr(_Bound().method)
 
 
+def test_stable_repr_captures_default_arguments() -> None:
+    """A free variable bound as a default argument is still captured state.
+
+    ``make`` closes over nothing: ``value`` is a default, so ``__closure__`` is
+    ``None``. Rendering only closure cells made two such predicates — one
+    matching ``"a"`` and one matching ``"b"`` — render identically, so a
+    behaviour change would not move the digest.
+    """
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    def make(value: str = "a"):
+        def predicate(text: str, subject: str, expected: str = value) -> bool:
+            return text == expected
+
+        return predicate
+
+    first, second = make("a"), make("b")
+    assert first.__closure__ is None, "precondition: no closure to render"
+    assert stable_repr(first) != stable_repr(second)
+    assert stable_repr(first) == stable_repr(make("a"))
+    assert "tuple('a')" in stable_repr(first)
+
+    # Keyword-only defaults are a separate collection and must also count.
+    def make_kw(value: str = "a"):
+        def predicate(text: str, subject: str, *, expected: str = value) -> bool:
+            return text == expected
+
+        return predicate
+
+    assert stable_repr(make_kw("a")) != stable_repr(make_kw("b"))
+    assert "dict({'expected':'b'})" in stable_repr(make_kw("b"))
+    # Positional defaults keep their order: they bind positionally.
+    assert stable_repr(make_kw("a")) != stable_repr(make("a"))
+
+
+def test_stable_repr_terminates_on_self_referential_callables() -> None:
+    """A callable that closes over itself gets a cycle marker, not a crash.
+
+    The callable must be in ``seen`` before its closure cells are rendered;
+    otherwise ``_render`` re-enters ``_render_callable`` on the same object
+    forever.
+    """
+    from paxman.core.grammar.matchers._stable import stable_repr
+
+    def make():
+        def predicate(text: str, subject: str) -> bool:
+            return predicate is not None
+
+        return predicate
+
+    recursive = make()
+    assert recursive.__closure__ is not None, "precondition: self-reference"
+    rendered = stable_repr(recursive)
+    assert "<cycle:" in rendered
+    assert rendered.endswith(">]")
+    assert "0x" not in rendered
+
+
 def test_stable_repr_includes_repr_false_init_fields() -> None:
     """``repr=False`` is a display hint, not a reason to drop configuration."""
     import dataclasses
