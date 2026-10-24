@@ -48,6 +48,20 @@ Core owns the domain vocabulary (pipeline value objects + `Rule`/`Grammar` ABCs)
   `tests/unit/test_kernel_stripped_chars.py`).
 - `validate_emit` at construction — span/raw_text invariants fail fast at emit.
 - Matcher digests memoised — per-matcher digest cached.
+- Digests render through `matchers/_stable.py` `stable_repr()` — never `repr()`.
+  A digest feeds `recognition_revision`, which must be identical across
+  processes; `repr(frozenset[str])` follows hash order (randomised per process
+  via `PYTHONHASHSEED`) and `repr()` of a bound method or plain object carries
+  an address. `stable_repr` tags containers by type (so an empty `set`,
+  `frozenset` and `dict` stay distinct), sorts set/dict members, keeps
+  sequence order, renders dataclass `init` fields in declaration order
+  (`repr=False` ignored — it is a display hint), qualifies dataclasses and
+  callables by module, renders callables with bound state (closure cells,
+  default/keyword-default arguments, `partial` args), tolerates
+  self-referential payloads and callables with a `<cycle:…>`
+  marker, and strips only a ` at 0x…>` address suffix from an unmodelled
+  repr. Pinned by exact-serialisation and cross-process tests in
+  `tests/unit/test_discovery_revision.py`.
 - `PipelineGrammar` `matchers` delegation — `recognize()` delegates to `run_matchers()`.
 - Common-word suppression 67 + 6 kinds (`regex`/`lexicon`/`scanner`/`combinator`/`candidates`/`label`, `Property` deleted) — `COMMON_WORDS` + `suppressible` + `suppress_common_words`.
 

@@ -20,6 +20,7 @@ from paxman.core.grammar.boundary_spec import BoundarySpec, check_boundary
 from paxman.core.grammar.matchers._emit_validation import (
     validate_emit as _validate_emit,
 )
+from paxman.core.grammar.matchers._stable import stable_repr
 from paxman.core.grammar.scan_context import View
 
 
@@ -76,8 +77,10 @@ class LabelMatcher:
             object.__setattr__(self, "_combined", None)
         # Digest: labels|separator|glued|pattern|flags|boundary|view|anchors
         view_repr = self.view_name if self.view_name is not None else "None"
-        boundary_repr = repr(self.boundary) if self.boundary is not None else "None"
-        anchors_repr = repr(self.anchors)
+        boundary_repr = (
+            stable_repr(self.boundary) if self.boundary is not None else "None"
+        )
+        anchors_repr = stable_repr(self.anchors)
         labels_repr = "|".join(sorted(self.labels)) if self.labels else ""
         digest_val = hashlib.sha256(
             f"{labels_repr}\x00{self.separator}\x00{self.glued_policy}\x00{self.pattern}\x00{self.flags}\x00{view_repr}\x00{boundary_repr}\x00{anchors_repr}".encode()

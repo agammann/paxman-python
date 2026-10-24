@@ -12,6 +12,7 @@ from typing import Any, cast
 from paxman.core.capability import Capability
 from paxman.core.errors import CapabilityError
 from paxman.core.extensions import freeze_extensions, reset_extensions
+from paxman.core.grammar.matchers._stable import stable_repr
 
 _registry: dict[str, Capability[Any]] = {}
 _frozen: bool = False
@@ -105,11 +106,11 @@ def freeze_registry() -> None:
                     else:
                         tokens_set: Any = getattr(matcher, "tokens", None)
                         if tokens_set is not None:
-                            tokens_repr = repr(tokens_set)
+                            tokens_repr = stable_repr(tokens_set)
                         else:
                             payload = getattr(matcher, "payload", None)
                             if payload is not None:
-                                tokens_repr = repr(payload)
+                                tokens_repr = stable_repr(payload)
                             else:
                                 scan_fn = getattr(
                                     matcher, "scan", None
@@ -120,7 +121,7 @@ def freeze_registry() -> None:
                                     )  # pragma: no cover
                                     max_window = getattr(matcher, "max_window", 0)
                                     boundary_repr_inner = (
-                                        repr(boundary)
+                                        stable_repr(boundary)
                                         if boundary is not None
                                         else "None"
                                     )
@@ -138,8 +139,12 @@ def freeze_registry() -> None:
                     # Include matcher-specific choices (e.g., lexicon _chosen)
                     chosen = getattr(matcher, "_chosen", "")
                     # Deterministic boundary/anchors repr
-                    boundary_repr = repr(boundary) if boundary is not None else "None"
-                    anchors_repr = repr(anchors) if anchors is not None else "None"
+                    boundary_repr = (
+                        stable_repr(boundary) if boundary is not None else "None"
+                    )
+                    anchors_repr = (
+                        stable_repr(anchors) if anchors is not None else "None"
+                    )
                     parts.append(
                         f"{cap.name}:{grammar.name}:{kind}:{view}:{boundary_repr}:"
                         f"{anchors_repr}:{requires_repr}:{suppressible}:{chosen}:{tokens_repr}"

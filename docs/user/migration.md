@@ -466,6 +466,39 @@ when a unit suffix can appear next to a country.
 Migrate: if you asserted `INVALID` for a token that is not a code, update
 goldens to `MISSING`. See the [Country guide](capabilities/country/).
 
+### Unreleased — `recognition_revision` is now process-stable (changed)
+
+`VersionStamp.recognition_revision` is documented as hashing the compiled
+matcher set plus snapshot hashes, and is meant to let you tell "a different
+library snapshot produced this result" from "a different process produced
+this result". It could not do that: several recognition payloads were
+rendered with `repr()`, and `repr(frozenset[str])` follows iteration order,
+which depends on per-process string hash randomisation. The same library
+snapshot gave a different revision in every interpreter.
+
+The revision is now computed from a canonical rendering: containers carry
+their type (an empty `set`, `frozenset` and `dict` stay distinguishable), set
+and dict members are sorted, dataclass `init` fields follow declaration order
+with `repr=False` ignored, dataclasses and callables carry their defining
+module, callables carry bound state (closure cells, default and
+keyword-default arguments, `partial` arguments), self-referential payloads
+and callables stop at a `<cycle:…>` marker, and only the ` at 0x…>` suffix
+is stripped from an unmodelled repr. Two consequences:
+
+- **Revision values changed once.** If you persisted
+  `version_stamp.recognition_revision` from an earlier build, re-baseline it;
+  the old values were not stable enough to compare against anyway.
+- **Nothing else changed.** Canonical values, statuses, spans, provenance and
+  candidate ordering are byte-identical for the same input and contract.
+
+One limit is worth knowing if you write a community `extra_grammars`
+extension: a matcher payload of a type `stable_repr` does not model keeps its
+own `repr()` (minus any ` at 0x…>` address). If that repr embeds an unordered
+container, its text is order-dependent and the payload cannot contribute exact
+revision identity. Shipped matchers are all modelled, so this only reaches
+extension payloads — make such a payload a dataclass, or expose the state you
+want hashed.
+
 ### 0.5.0 — New capabilities: Timezone + UtcOffset (additive)
 
 `Timezone` (IANA key canonical, `iana` default, no offered formats,
