@@ -164,10 +164,19 @@ class TestNumericGrammar:
         assert results[0].notation.value == "4"
 
     def test_recognizes_two_digits(self) -> None:
-        """Edge case: two digits."""
-        results = self.grammar.recognize("82")
+        """Edge case: a two-digit run that zero-pads to an assigned code."""
+        results = self.grammar.recognize("50")
         assert len(results) == 1
-        assert results[0].notation.value == "82"
+        assert results[0].notation.value == "50"
+
+    def test_rejects_unassigned_two_digits(self) -> None:
+        """Edge case: a two-digit run with no assigned M49 code is not claimed.
+
+        "82" zero-pads to "082", which ISO 3166-1 does not assign, so no
+        authority could ever accept it — the lane does not claim it.
+        """
+        results = self.grammar.recognize("82")
+        assert len(results) == 0
 
     def test_recognizes_with_whitespace(self) -> None:
         """Edge case: whitespace is trimmed."""
@@ -452,6 +461,153 @@ class TestNameGrammar:
         assert "  United States  "[results[0].start : results[0].end] == (
             results[0].raw_text
         )
+
+
+class TestCodeLaneClaimSets:
+    """The code lanes claim only tokens that can resolve to an ISO 3166-1 code.
+
+    The alpha-2, alpha-3 and numeric lanes recognize *code tokens*, not
+    arbitrary token shapes: a token that no authority could ever accept is
+    never claimed (audit findings E3/E4 — ``scan()`` reports claims, so an
+    over-broad shape surfaces as a spurious mention).
+    """
+
+    def setup_method(self) -> None:
+        self.alpha2 = Alpha2Grammar()
+        self.alpha3 = Alpha3Grammar()
+        self.numeric = NumericGrammar()
+
+    def test_alpha2_claims_only_iso_codes(self) -> None:
+        """Two-letter tokens that are not ISO codes are not claimed."""
+        # "the" is a shape, not a code — nothing to claim.
+        assert self.alpha2.recognize("the") == []
+        # "xx" is not an assigned alpha-2 code.
+        assert self.alpha2.recognize("xx") == []
+        # "and" IS an alpha-3 code, not an alpha-2 one.
+        assert self.alpha2.recognize("and") == []
+        # Assigned codes are still claimed, in any case.
+        for text in ("US", "us", "Us"):
+            results = self.alpha2.recognize(text)
+            assert len(results) == 1, text
+            assert results[0].notation.value == "US"
+
+    def test_alpha3_claims_only_iso_codes(self) -> None:
+        """Three-letter tokens that are not ISO codes are not claimed."""
+        for text in ("the", "for", "xyz"):
+            assert self.alpha3.recognize(text) == [], text
+        # "and" IS an alpha-3 code (Andorra) — a valid-code collision.
+        results = self.alpha3.recognize("and")
+        assert len(results) == 1
+        assert results[0].notation.value == "AND"
+        for text in ("USA", "usa", "UsA"):
+            results = self.alpha3.recognize(text)
+            assert len(results) == 1, text
+            assert results[0].notation.value == "USA"
+
+    def test_numeric_claims_only_assigned_m49(self) -> None:
+        """Digit runs that are not assigned M49 codes are not claimed."""
+        for text in ("01", "15", "999", "0", "00"):
+            assert self.numeric.recognize(text) == [], text
+        # Assigned codes are still claimed, in the zero-padded form.
+        results = self.numeric.recognize("840")
+        assert len(results) == 1
+        assert results[0].notation.value == "840"
+        # The rule zero-pads to 3 digits, so the shorter forms stay claimable.
+        for text in ("4", "004", "50"):
+            results = self.numeric.recognize(text)
+            assert len(results) == 1, text
+
+    def test_claim_sets_match_the_iso_tables(self) -> None:
+        """The recognition key sets equal the rule-layer authority tables.
+
+        Both directions, on the shipped key sets directly: every authority
+        key is claimed (no input a rule accepts is unreachable) and every
+        claimed key has an authority (no spurious mention). Deriving the
+        grammar input from rule keys alone would only prove the first
+        direction — an extra key in a ``*_CODE_KEYS`` set would be invisible.
+        """
+        from paxman.capabilities.Country.grammar.data.alpha2_codes import (
+            ALPHA2_CODE_KEYS,
+        )
+        from paxman.capabilities.Country.grammar.data.alpha3_codes import (
+            ALPHA3_CODE_KEYS,
+        )
+        from paxman.capabilities.Country.grammar.data.numeric_codes import (
+            NUMERIC_CODE_KEYS,
+        )
+        from paxman.capabilities.Country.rules.data.iso_3166_ed2020_part3 import (
+            FORMER_ALPHA2_CODES,
+            FORMER_NUMERIC_TO_ALPHA2,
+        )
+        from paxman.capabilities.Country.rules.data.iso_3166_ed2024 import (
+            ALPHA2_TO_ALPHA3,
+            ALPHA3_TO_ALPHA2,
+            NUMERIC_TO_ALPHA2,
+        )
+
+        # Alpha keys are lowercased for the casefolded view; the authority
+        # tables are uppercase. Alpha-2 also carries the former ISO 3166-3
+        # codes the historical rule validates. Alpha-3 carries no former
+        # codes, because no rule ever resolved one: a former alpha-3 such as
+        # "BUR" or "YUG" was INVALID even with include_historical=True before
+        # the narrowing, so claiming none loses no successful result.
+        expected_alpha2 = {code.lower() for code in ALPHA2_TO_ALPHA3} | {
+            code.lower() for code in FORMER_ALPHA2_CODES
+        }
+        assert expected_alpha2 == ALPHA2_CODE_KEYS
+        expected_alpha3 = {code.lower() for code in ALPHA3_TO_ALPHA2}
+        assert expected_alpha3 == ALPHA3_CODE_KEYS
+
+        # Numeric: every token whose zero-padded form is an authority code —
+        # current M49 and retired ISO 3166-3 alike, at every width the
+        # validator's ``int()`` + ``:03d`` padding can reach.
+        numeric_authority = set(NUMERIC_TO_ALPHA2) | set(FORMER_NUMERIC_TO_ALPHA2)
+        expected_numeric: set[str] = set()
+        for code in numeric_authority:
+            expected_numeric.add(code)
+            for width in (1, 2):
+                if code[:width] == "0" * width:
+                    expected_numeric.add(code[width:])
+        assert expected_numeric == NUMERIC_CODE_KEYS
+
+        # The key sets are actually wired into the matchers that claim.
+        assert {
+            m.notation.value.lower()
+            for m in self.alpha2.recognize(" ".join(ALPHA2_CODE_KEYS))
+        } == ALPHA2_CODE_KEYS
+        assert {
+            m.notation.value.lower()
+            for m in self.alpha3.recognize(" ".join(ALPHA3_CODE_KEYS))
+        } == ALPHA3_CODE_KEYS
+        assert {
+            m.notation.value
+            for m in self.numeric.recognize(" ".join(NUMERIC_CODE_KEYS))
+        } == NUMERIC_CODE_KEYS
+
+    def test_numeric_lane_claims_unicode_decimal_digits(self) -> None:
+        """Every Unicode decimal-digit (Nd) script is claimed.
+
+        The numeric rule resolves through ``int()``, which accepts any Nd
+        digit, so the ASCII key set has to reach those forms — otherwise the
+        narrowing would turn a previously successful input into MISSING.
+        """
+        for token in (
+            "\u0668\u0664\u0660",
+            "\u096e\u096a\u0966",
+            "\uff18\uff14\uff10",
+            "\U0001d7d6\U0001d7d2\U0001d7ce",
+        ):
+            matches = self.numeric.recognize(token)
+            assert len(matches) == 1, token
+            # The raw digits are kept; the view only rewrites for lookup.
+            assert matches[0].notation.value == token
+            assert (matches[0].start, matches[0].end) == (0, 3)
+
+        # The narrowing still holds: a run that no code can accept is unseen,
+        # in ASCII and in a non-ASCII script alike ("82" pads to unassigned
+        # "082").
+        assert self.numeric.recognize("82") == []
+        assert self.numeric.recognize("\u0668\u0662") == []
 
 
 class TestNormalizeName:

@@ -429,6 +429,43 @@ bare `Element` name for future non-chemical element domains (e.g.
 (`Section IR-3.1-names-and-symbols`, `Section PTOE-element-registry`).
 See the [ChemicalElement guide](capabilities/chemical_element/).
 
+### Unreleased — Country code lanes narrowed (changed)
+
+The alpha-2, alpha-3 and numeric lanes now recognize the ISO 3166-1 code
+**vocabulary** instead of an arbitrary token shape. Previously any 2-letter,
+3-letter and 1–3-digit token in prose was claimed and then handed to the
+validation rule; because `paxman.scan()` reports claims rather than validated
+candidates, ordinary words surfaced as country mentions.
+
+Inputs that were recognized but could never resolve now return `MISSING`
+instead of `INVALID`:
+
+| Input | Before | After |
+|-------|--------|-------|
+| `the`, `for` (not alpha-3 codes) | `INVALID` | `MISSING` |
+| `01`, `15`, `45` (not assigned M49 codes) | `INVALID` | `MISSING` |
+| `ZZ`, `XX` (not assigned alpha-2 codes) | `INVALID` | `MISSING` |
+| `USD`, `XYZ` (not alpha-3 codes) | `INVALID` | `MISSING` |
+
+No successful resolution changes — every token that can resolve is still
+claimed, including the zero-padded numeric forms (`4` → `AF`, `50` → `BD`),
+the ISO 3166-3 former codes (`SU`, `BU`), and the lowercase forms (`us`,
+`usa`, `and`). `scan()` mentions for a typical sentence drop from 9 to 4.
+
+The residual valid-code collisions (`and` → `AD`, `to` → `TO`, `by` → `BY`)
+are unchanged: they are real ISO 3166-1 codes and remain the ADR-0009 §16
+common-word-suppression class. Pass `suppress_common_words=True` to
+canonicalize prose (`"US and USA"` → `SUCCESS "US"`).
+
+Suppression covers the fixed `COMMON_WORDS` intersection only. A valid code
+that is *not* a common English word is still claimed and is not suppressed —
+`kg` → `KG` is the clear case, so `"US kg"` stays a two-mention input and
+raises `MultipleMentionsError` with suppression on as well. Split the text
+when a unit suffix can appear next to a country.
+
+Migrate: if you asserted `INVALID` for a token that is not a code, update
+goldens to `MISSING`. See the [Country guide](capabilities/country/).
+
 ### 0.5.0 — New capabilities: Timezone + UtcOffset (additive)
 
 `Timezone` (IANA key canonical, `iana` default, no offered formats,

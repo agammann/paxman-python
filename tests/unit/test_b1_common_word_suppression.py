@@ -61,12 +61,19 @@ def test_scan_off_snapshot_locked() -> None:
     contract = _contract_country(False)
     result = scan(TEXT, [contract])
     mentions = result.mentions["country"]
-    # 9 clustered mentions off — locked snapshot
-    assert len(mentions) == 9
+    # 4 clustered mentions off — locked snapshot.
+    # The code lanes claim the ISO 3166-1 code vocabulary, not arbitrary
+    # token shapes, so "the", "45", "USD", "3" and "5" are never claimed.
+    assert len(mentions) == 4
     spans = {m.span for m in mentions}
     assert (5, 7) in spans  # to -> Tonga
-    assert (8, 11) in spans  # the
-    assert (66, 68) in spans  # kg
+    assert (12, 36) in spans  # United States of America
+    assert (47, 49) in spans  # 50 -> Bangladesh (zero-padded 050)
+    assert (66, 68) in spans  # kg -> Kyrgyzstan
+    # Never claimed: none of these is an ISO 3166-1 code, so no rule could
+    # ever accept them.
+    for absent in ((8, 11), (44, 46), (50, 53), (62, 63), (64, 65)):
+        assert absent not in spans
 
 
 def test_scan_on_suppresses_common_words() -> None:
@@ -81,11 +88,12 @@ def test_scan_on_suppresses_common_words() -> None:
     assert name_mentions[0].grammar == "name_recognition"
     spans = {m.span for m in mentions}
     assert (5, 7) not in spans  # to is common word -> suppressed
-    # the / kg are not in COMMON_WORDS (not valid-code collisions) so they remain
-    assert (8, 11) in spans  # the not suppressed
+    # kg is not in COMMON_WORDS (not a valid-code collision) so it remains
     assert (66, 68) in spans  # kg not suppressed (kg not in Google1000)
-    # total noise reduced: off 9 -> on 8 (only to removed)
-    assert len(mentions) == 8
+    # "the" is not a code, so it is never claimed — nothing to suppress
+    assert (8, 11) not in spans
+    # total noise reduced: off 4 -> on 3 (only "to" removed)
+    assert len(mentions) == 3
 
 
 def test_scan_on_usd_remains_for_currency() -> None:
@@ -177,7 +185,10 @@ def test_suppression_signal_missing() -> None:
 def test_suppression_signal_invalid() -> None:
     reset_registry()
     paxman.register_all_shipped()
-    result = canonicalize("to and 999", _contract_country(True))
+    # "SU" is a former ISO 3166-3 code: claimed by the alpha-2 lane, but
+    # rejected by the current-code rule while the historical rule is gated
+    # off — so the call resolves INVALID.
+    result = canonicalize("to and SU", _contract_country(True))
     assert result.status == Resolution.INVALID
     assert result.suppressed_count == 2
     assert set(result.suppressed_spans) == {(0, 2), (3, 6)}

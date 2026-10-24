@@ -12,10 +12,67 @@ Canonicalizes **one country mention** per call — a code or a name — to a can
 
 | Recognizes (current release — growing) | Does not recognize |
 |----------------------------------------|--------------------|
-| ISO 3166-1 alpha-2 (`US`, `DE`), alpha-3 (`USA`), numeric (`840`) | Ad-hoc abbreviations without a spec (`'Murica`) |
+| ISO 3166-1 alpha-2 (`US`, `DE`), alpha-3 (`USA`), numeric (`840`) — **code tokens only** | Ad-hoc abbreviations without a spec (`'Murica`) |
 | Country names in English (`United States`, `Germany`) | Regions or subdivisions (`California`, `Bavaria`) — countries only |
 | CLDR localized names (`Alemania` → `DE`) — only when `include_localized=True` | Localized names when the flag is off — recognized but `INVALID` (no authority claims them) |
 | Historical/deprecated names (`Burma`) — only when `include_historical=True`, via ISO 3166-3 | Historical names when the flag is off — `INVALID` |
+| Former codes (`SU`, `BU`) — always claimed; resolve only when `include_historical=True` | Tokens that are not codes at all (`the`, `for`, `01`, `15`) — never claimed → `MISSING` |
+
+The code lanes recognize the ISO 3166-1 code **vocabulary**, not an arbitrary
+token shape. A two-letter word that is not an assigned alpha-2 code is never
+claimed, so it cannot surface as a spurious mention in
+[`paxman.scan()`](../api-reference/).
+
+### Input → canonical value
+
+| Input kind | Example | Canonical (default `alpha2`) |
+|------------|---------|------------------------------|
+| alpha-2 code | `US` / `us` | `US` |
+| alpha-3 code | `USA` | `US` |
+| numeric (M49) code | `840`, `004`, `4` | `US`, `AF`, `AF` |
+| English name | `United States` | `US` |
+| CLDR localized name | `Alemania` (with `include_localized=True`) | `DE` |
+| Historical name / former code | `Burma`, `SU` (with `include_historical=True`) | `BU`, `SU` |
+
+### Known collisions
+
+Some ISO 3166-1 codes are also ordinary English words. Lowercase `and` is
+Andorra's alpha-3 code; `to` is Tonga's alpha-2 code; `by` is Belarus's. Those
+tokens **are** codes, so they are still claimed — but they are exactly the
+class [common-word suppression](../concepts/contracts/) exists for. Under the
+default contract such a word is a second mention, so `"US and USA"` raises
+`MultipleMentionsError`; with suppression on, the collision is skipped and the
+country resolves:
+
+```python
+import paxman
+from paxman.capabilities import Country
+
+paxman.register_all_shipped()
+
+paxman.canonicalize(
+    "US and USA", Country.create_contract(suppress_common_words=True)
+).canonicalized_value  # "US"
+```
+
+The suppression list is the intersection of the most common English words with
+valid ISO 3166-1 alpha-2/alpha-3 codes — 28 two-letter words (`al`, `am`, `an`,
+`as`, `at`, `be`, `by`, `ca`, `cd`, `co`, `de`, `do`, `et`, `id`, `in`, `is`,
+`it`, `la`, `me`, `my`, `no`, `pm`, `re`, `so`, `st`, `to`, `tv`, `us`) and 7
+three-letter words (`ago`, `and`, `are`, `can`, `mar`, `per`, `usa`). A bare
+whole-input common word stays recognized (the A0 exemption,
+[#122](https://github.com/nexusnv/paxman-python/issues/122)), so
+`canonicalize("and")` still returns `AD`.
+
+Words that are *not* codes (`the`, `for`, `01`, `15`) are never claimed at all,
+so there is nothing to suppress.
+
+Suppression is not a general "ignore any word that is also a code" switch. It
+covers only that fixed intersection, so a valid code that is not a common
+English word is claimed and never suppressed: `kg` → `KG` (Kyrgyzstan) means
+`"US kg"` is a two-mention input and raises `MultipleMentionsError` even with
+`suppress_common_words=True`. Split the text when a unit suffix can sit next
+to a country.
 
 ---
 
@@ -28,7 +85,7 @@ Default `output_format` is `"alpha2"`.
 | *(default)* `alpha2` / `None` / `"default"` | ISO 3166-1 alpha-2 | `US` |
 | `alpha3` | ISO 3166-1 alpha-3 | `USA` |
 | `numeric` | ISO 3166-1 numeric | `840` |
-| `name` | English short name | `United States` |
+| `name` | ISO 3166-1 English short name (uppercase, as published) | `UNITED STATES` |
 
 Any other value raises `ContractError`.
 
@@ -48,7 +105,7 @@ paxman.canonicalize(
 ).canonicalized_value  # "840"
 paxman.canonicalize(
     "US", Country.create_contract(output_format="name")
-).canonicalized_value  # "United States"
+).canonicalized_value  # "UNITED STATES"
 ```
 
 ---
@@ -81,7 +138,10 @@ Historical names can also be viewed as excluding the current ISO 3166-1 name rul
 | `Alemania` | `include_localized=True` | `SUCCESS` | → `"DE"` with CLDR provenance |
 | `Burma` | defaults | `INVALID` | needs `include_historical` |
 | `Burma` | `include_historical=True` | `SUCCESS` | → `"BU"` (historical entity's own code) |
-| `ZZ` | any | `INVALID` or `MISSING` | no spec claims it |
+| `ZZ` | any | `MISSING` | not an assigned code — never claimed |
+| `the`, `for`, `01`, `15` | any | `MISSING` | not ISO 3166-1 codes — never claimed |
+| `SU` | defaults | `INVALID` | a former ISO 3166-3 code: claimed, but needs `include_historical` |
+| `SU` | `include_historical=True` | `SUCCESS` | → `"SU"` (historical entity's own code) |
 | `hello world` | any | `MISSING` | no country pattern |
 | `US and DE` (two different mentions) | any | raises `MultipleMentionsError` | split first |
 

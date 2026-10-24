@@ -13,6 +13,7 @@ from paxman.core.grammar.data.common_words import COMMON_WORDS
 from paxman.core.grammar.normalizers import (
     CaseFold,
     CountryNameFold,
+    DecimalDigitFold,
     IDNAFold,
     Normalizer,
     SeparatorFold,
@@ -47,6 +48,7 @@ _VIEW_REGISTRY: dict[str, Normalizer] = {
     "symbol_normalized": SymbolFold(),
     "compact": StripSeparators(),
     "idna": IDNAFold(),
+    "ascii_digits": DecimalDigitFold(),
 }
 
 
