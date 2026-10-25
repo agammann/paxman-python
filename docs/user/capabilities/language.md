@@ -80,7 +80,7 @@ contract = Language.create_contract(
 ```
 
 - `include_private` gates `Section 4-private-alpha-3` and `Section-iana-registry-private`; without it `qaa` is `INVALID` (grammar claims, no rule validates).
-- `include_collective` gates `Section 4-collective-code`; without it `aav` is `INVALID`. It also gates every route that would *emit* a collection: the English-name rule (`Bihari` → `INVALID`) and deprecated resolution (`bh` stays `bh` instead of becoming `bih`). One flag, one meaning: a collection code only ever leaves the capability when you asked for collections.
+- `include_collective` gates `Section 4-collective-code`; without it `aav` is `INVALID`. It also gates the routes that *emit* a collection from a bare code or a name: the English-name rule (`Bihari` → `INVALID`) and deprecated resolution (`bh` stays `bh` instead of becoming `bih`). One flag, one meaning across those three routes. The gate is **not yet enforced for a collection primary inside a tag** — `ber-Latn` is `SUCCESS` and `bh-Latn` is `AMBIGUOUS` (see the tag-lane limitation note above).
 - `include_localized` gates `Section-localized-names`; without it `allemand` is recognized but `INVALID`.
 - `year` filters by `publication_year`; e.g., `year=2008` drops BCP 47 RFC 5646 (2009) → `en-US` becomes `INVALID`.
 
