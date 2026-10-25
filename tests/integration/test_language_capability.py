@@ -1070,3 +1070,28 @@ def test_deprecated_bihari_code_respects_gate() -> None:
     )
     assert collective.status == Resolution.SUCCESS
     assert collective.canonicalized_value == "bih"
+
+
+@pytest.mark.integration
+def test_bare_code_carries_dual_provenance() -> None:
+    """A registered bare code validated by two authorities keeps both records.
+
+    ``en`` is ISO 639-1 *and* IANA-registered; both rules are LOOKUP_TABLE and
+    agree on the canonical, so status stays keyed on the value set (SUCCESS)
+    with two candidates carrying distinct provenance (Decision D7). ``sh`` has
+    only the registry authority, so it keeps a single record.
+    """
+    _register()
+    contract = LanguageCapability.create_contract()
+    en = paxman.canonicalize("en", contract)
+    assert en.status == Resolution.SUCCESS
+    assert en.canonicalized_value == "en"
+    assert len(en.candidates) == 2
+    assert {c.validation_rule for c in en.candidates} == {
+        "Section 4-alpha-2-code",
+        "Section-iana-registry",
+    }
+    sh = paxman.canonicalize("sh", contract)
+    assert sh.status == Resolution.SUCCESS
+    assert len(sh.candidates) == 1
+    assert sh.candidates[0].validation_rule == "Section-iana-registry"
